@@ -5,6 +5,8 @@ import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:grouped_list/grouped_list.dart';
+import 'package:grouped_list/sliver_grouped_list.dart';
 import 'package:provider/provider.dart';
 
 import 'bloc/pagination_cubit.dart';
@@ -121,11 +123,21 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
           if (loadedState.documentSnapshots.isEmpty) {
             return _buildWithScrollView(context, widget.onEmpty);
           }
-          return widget.itemBuilderType == PaginateBuilderType.listView
-              ? _buildListView(loadedState)
-              : widget.itemBuilderType == PaginateBuilderType.gridView
-                  ? _buildGridView(loadedState)
-                  : _buildPageView(loadedState);
+
+          switch (widget.itemBuilderType) {
+            case PaginateBuilderType.listView:
+              _buildListView(loadedState);
+              break;
+            case PaginateBuilderType.groupedListView:
+              _buildGroupedListView(loadedState);
+              break;
+            case PaginateBuilderType.gridView:
+              _buildGridView(loadedState);
+              break;
+            case PaginateBuilderType.pageView:
+              _buildPageView(loadedState);
+              break;
+          }
         }
       },
     );
@@ -333,6 +345,112 @@ class _PaginateFirestoreState extends State<PaginateFirestore> {
 
     return pageView;
   }
+
+  Widget _testGroupedListView(PaginationLoaded loadedState) {
+    var listView = GroupedListView<dynamic, String>(
+      reverse: widget.reverse,
+      controller: widget.scrollController,
+      shrinkWrap: widget.shrinkWrap,
+      scrollDirection: widget.scrollDirection,
+      physics: widget.physics,
+      keyboardDismissBehavior: widget.keyboardDismissBehavior,
+      semanticChildCount: max(
+          0,
+          (loadedState.hasReachedEnd
+                      ? loadedState.documentSnapshots.length
+                      : loadedState.documentSnapshots.length + 1) *
+                  2 -
+              1),
+
+      //
+      //
+      elements: _elements,
+      groupBy: (element) => element['group'],
+      groupSeparatorBuilder: (String groupByValue) => Text(groupByValue),
+      itemBuilder: (context, dynamic element) => Text(element['name']),
+      itemComparator: (item1, item2) =>
+          item1['name'].compareTo(item2['name']), // optional
+      useStickyGroupSeparators: true, // optional
+      floatingHeader: true, // optional
+      order: GroupedListOrder.ASC, // optional
+    );
+
+    if (widget.listeners != null && widget.listeners!.isNotEmpty) {
+      return MultiProvider(
+        providers: widget.listeners!
+            .map((_listener) => ChangeNotifierProvider(
+                  create: (context) => _listener,
+                ))
+            .toList(),
+        child: listView,
+      );
+    }
+
+    return listView;
+  }
+
+  Widget _buildGroupedListView(PaginationLoaded loadedState) {
+    var listView = CustomScrollView(
+      reverse: widget.reverse,
+      controller: widget.scrollController,
+      shrinkWrap: widget.shrinkWrap,
+      scrollDirection: widget.scrollDirection,
+      physics: widget.physics,
+      keyboardDismissBehavior: widget.keyboardDismissBehavior,
+      slivers: [
+        if (widget.header != null) widget.header!,
+        SliverPadding(
+          padding: widget.padding,
+          sliver: SliverGroupedListView(
+            //
+            //
+            elements: loadedState.documentSnapshots,
+            // groupBy: (element) => element['group'],
+            groupSeparatorBuilder: (String groupByValue) => Text(groupByValue),
+            itemBuilder: (context, dynamic element) => Text(element['name']),
+            // itemComparator: (item1, item2) =>
+            //     item1['name'].compareTo(item2['name']), // optional
+            // useStickyGroupSeparators: true, // optional
+            // floatingHeader: true, // optional
+            order: GroupedListOrder.ASC, // optional
+// indexedItemBuilder: ,
+            indexedItemBuilder: (context, element, index) {
+              final itemIndex = index ~/ 2;
+              if (index.isEven) {
+                if (itemIndex >= loadedState.documentSnapshots.length) {
+                  _cubit!.fetchPaginatedList();
+                  return widget.bottomLoader;
+                }
+                return widget.itemBuilder(
+                  context,
+                  loadedState.documentSnapshots,
+                  itemIndex,
+                );
+              }
+              return widget.separator;
+            },
+            groupBy: (DocumentSnapshot<Object?> element) {
+              return element.id;
+            },
+          ),
+        ),
+        if (widget.footer != null) widget.footer!,
+      ],
+    );
+
+    if (widget.listeners != null && widget.listeners!.isNotEmpty) {
+      return MultiProvider(
+        providers: widget.listeners!
+            .map((_listener) => ChangeNotifierProvider(
+                  create: (context) => _listener,
+                ))
+            .toList(),
+        child: listView,
+      );
+    }
+
+    return listView;
+  }
 }
 
-enum PaginateBuilderType { listView, gridView, pageView }
+enum PaginateBuilderType { listView, groupedListView, gridView, pageView }
